@@ -4,6 +4,7 @@
 
 //! This module defines the functions for managing the filtering of the configuration.
 
+use crate::configuration_overrides_types::JSONOverridesRecord;
 use crate::environment_matching::matches_user_environment;
 use crate::{
     error::Error, JSONDefaultEnginesRecord, JSONEngineBase, JSONEngineRecord, JSONEngineUrl,
@@ -94,6 +95,17 @@ impl SearchEngineDefinition {
         }
     }
 
+    fn merge_override(&mut self, override_record: &JSONOverridesRecord) {
+        self.partner_code = override_record.partner_code.clone();
+        self.urls.merge(&override_record.urls);
+        if let Some(telemetry_suffix) = &override_record.telemetry_suffix {
+            self.telemetry_suffix = telemetry_suffix.clone();
+        }
+        if self.click_url.is_none() {
+            self.click_url = Some(override_record.click_url.clone());
+        }
+    }
+
     pub(crate) fn from_configuration_details(
         identifier: &str,
         base: JSONEngineBase,
@@ -111,6 +123,7 @@ impl SearchEngineDefinition {
             partner_code: base.partner_code.unwrap_or_default(),
             telemetry_suffix: String::new(),
             urls: base.urls.into(),
+            click_url: None,
         };
 
         engine_definition.merge_variant(variant);
@@ -132,6 +145,7 @@ pub(crate) trait Filter {
     fn filter_records(
         &self,
         user_environment: &SearchUserEnvironment,
+        overrides: Option<Vec<JSONOverridesRecord>>,
     ) -> Result<FilterRecordsResult, Error>;
 }
 
@@ -139,6 +153,7 @@ impl Filter for Vec<RemoteSettingsRecord> {
     fn filter_records(
         &self,
         user_environment: &SearchUserEnvironment,
+        _overrides: Option<Vec<JSONOverridesRecord>>,
     ) -> Result<FilterRecordsResult, Error> {
         let mut engines = Vec::new();
         let mut default_engines_record = None;
@@ -183,6 +198,7 @@ impl Filter for Vec<JSONSearchConfigurationRecords> {
     fn filter_records(
         &self,
         user_environment: &SearchUserEnvironment,
+        overrides: Option<Vec<JSONOverridesRecord>>,
     ) -> Result<FilterRecordsResult, Error> {
         let mut engines = Vec::new();
         let mut default_engines_record = None;
@@ -191,7 +207,10 @@ impl Filter for Vec<JSONSearchConfigurationRecords> {
         for record in self {
             match record {
                 JSONSearchConfigurationRecords::Engine(engine) => {
-                    let result = maybe_extract_engine_config(user_environment, engine.clone());
+                    let mut result = maybe_extract_engine_config(user_environment, engine.clone());
+                    if let Some(overrides_data) = &overrides {
+                        apply_overrides(&mut result, overrides_data);
+                    }
                     engines.extend(result);
                 }
                 JSONSearchConfigurationRecords::DefaultEngines(default_engines) => {
@@ -214,16 +233,30 @@ impl Filter for Vec<JSONSearchConfigurationRecords> {
     }
 }
 
+fn apply_overrides(
+    engines: &mut Option<SearchEngineDefinition>,
+    overrides: &[JSONOverridesRecord],
+) {
+    for override_record in overrides {
+        if let Some(engine) = engines
+            .iter_mut()
+            .find(|e| e.identifier == override_record.identifier)
+        {
+            engine.merge_override(override_record);
+        }
+    }
+}
 pub(crate) fn filter_engine_configuration_impl(
     user_environment: SearchUserEnvironment,
     configuration: &impl Filter,
+    overrides: Option<Vec<JSONOverridesRecord>>,
 ) -> Result<RefinedSearchConfig, Error> {
     let mut user_environment = user_environment.clone();
     user_environment.locale = user_environment.locale.to_lowercase();
     user_environment.region = user_environment.region.to_lowercase();
     user_environment.version = user_environment.version.to_lowercase();
 
-    let filtered_result = configuration.filter_records(&user_environment);
+    let filtered_result = configuration.filter_records(&user_environment, overrides);
 
     filtered_result.map(|result| {
         let (default_engine_id, default_private_engine_id) = determine_default_engines(
@@ -442,7 +475,8 @@ mod tests {
                     suggestions: None,
                     trending: None,
                     search_form: None
-                }
+                },
+                click_url: None
             }
         )
     }
@@ -593,7 +627,8 @@ mod tests {
                         }],
                         search_term_param_name: None,
                     }),
-                }
+                },
+                click_url: None
             }
         )
     }
@@ -719,7 +754,8 @@ mod tests {
                         }],
                         search_term_param_name: None,
                     }),
-                }
+                },
+                click_url: None
             }
         )
     }
@@ -904,7 +940,8 @@ mod tests {
                         }],
                         search_term_param_name: None,
                     }),
-                }
+                },
+                click_url: None
             }
         )
     }

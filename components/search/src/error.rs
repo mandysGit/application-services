@@ -17,6 +17,8 @@ use remote_settings::RemoteSettingsError;
 pub enum Error {
     #[error("Search configuration not specified")]
     SearchConfigNotSpecified,
+    #[error("Search configuration overrides not specified")]
+    SearchConfigOverridesNotSpecified,
     #[error("No records received from remote settings")]
     SearchConfigNoRecords,
     #[error("JSON error: {0}")]

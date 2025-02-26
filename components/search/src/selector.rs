@@ -4,6 +4,7 @@
 
 //! This module defines the main `SearchEngineSelector`.
 
+use crate::configuration_overrides_types::JSONSearchConfigurationOverrides;
 use crate::filter::filter_engine_configuration_impl;
 use crate::{
     error::Error, JSONSearchConfiguration, RefinedSearchConfig, SearchApiResult,
@@ -17,6 +18,7 @@ use std::sync::Arc;
 #[derive(Default)]
 pub(crate) struct SearchEngineSelectorInner {
     configuration: Option<JSONSearchConfiguration>,
+    configuration_overrides: Option<JSONSearchConfigurationOverrides>,
     search_config_client: Option<Arc<RemoteSettingsClient>>,
 }
 
@@ -68,6 +70,15 @@ impl SearchEngineSelector {
         Ok(())
     }
 
+    #[handle_error(Error)]
+    pub fn set_config_overrides(self: Arc<Self>, overrides: String) -> SearchApiResult<()> {
+        if overrides.is_empty() {
+            return Err(Error::SearchConfigOverridesNotSpecified);
+        }
+        self.0.lock().configuration_overrides = serde_json::from_str(&overrides)?;
+        Ok(())
+    }
+
     /// Clears the search configuration from memory if it is known that it is
     /// not required for a time, e.g. if the configuration will only be re-filtered
     /// after an app/environment update.
@@ -92,16 +103,21 @@ impl SearchEngineSelector {
                 if records.is_empty() {
                     return Err(Error::SearchConfigNoRecords);
                 }
-                return filter_engine_configuration_impl(user_environment, &records);
+                return filter_engine_configuration_impl(user_environment, &records, None);
             } else {
                 return Err(Error::SearchConfigNoRecords);
             }
         }
-        let data = match &self.0.lock().configuration {
+        let config = match &self.0.lock().configuration {
             None => return Err(Error::SearchConfigNotSpecified),
             Some(configuration) => configuration.data.clone(),
         };
-        return filter_engine_configuration_impl(user_environment, &data);
+
+        let config_overrides = match &self.0.lock().configuration_overrides {
+            None => return Err(Error::SearchConfigOverridesNotSpecified),
+            Some(overrides) => overrides.data.clone(),
+        };
+        return filter_engine_configuration_impl(user_environment, &config, Some(config_overrides));
     }
 }
 
@@ -270,6 +286,26 @@ mod tests {
     fn test_filter_engine_configuration_returns_basic_engines() {
         let selector = Arc::new(SearchEngineSelector::new());
 
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+            "data": [
+                {
+                  "identifier": "overrides-engine",
+                  "partnerCode": "test-partner",
+                  "clickUrl": "https://example.com/click",
+                  "telemetrySuffix": "test-suffix",
+                  "urls": {
+                    "search": {
+                      "base": "https://example.com/search?q={searchTerm}",
+                      "method": "GET",
+                      "params": []
+                    }
+                  }
+                }
+              ]
+            })
+            .to_string(),
+        );
         let config_result = Arc::clone(&selector).set_search_config(
             json!({
               "data": [
@@ -355,6 +391,11 @@ mod tests {
             config_result.is_ok(),
             "Should have set the configuration successfully. {:?}",
             config_result
+        );
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
         );
 
         let result = selector.filter_engine_configuration(SearchUserEnvironment {
@@ -445,7 +486,8 @@ mod tests {
                             suggestions: None,
                             trending: None,
                             search_form: None
-                        }
+                        },
+                        click_url: None,
                     }
                 ),
                 app_default_engine_id: Some("test1".to_string()),
@@ -458,6 +500,26 @@ mod tests {
     fn test_filter_engine_configuration_handles_basic_variants() {
         let selector = Arc::new(SearchEngineSelector::new());
 
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+            "data": [
+                {
+                  "identifier": "overrides-engine",
+                  "partnerCode": "test-partner",
+                  "clickUrl": "https://example.com/click",
+                  "telemetrySuffix": "test-suffix",
+                  "urls": {
+                    "search": {
+                      "base": "https://example.com/search?q={searchTerm}",
+                      "method": "GET",
+                      "params": []
+                    }
+                  }
+                }
+              ]
+            })
+            .to_string(),
+        );
         let config_result = Arc::clone(&selector).set_search_config(
             json!({
               "data": [
@@ -558,6 +620,11 @@ mod tests {
             "Should have set the configuration successfully. {:?}",
             config_result
         );
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
+        );
 
         let result = selector.filter_engine_configuration(SearchUserEnvironment {
             region: "FR".into(),
@@ -657,6 +724,26 @@ mod tests {
     fn test_filter_engine_configuration_handles_basic_subvariants() {
         let selector = Arc::new(SearchEngineSelector::new());
 
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+            "data": [
+                {
+                  "identifier": "overrides-engine",
+                  "partnerCode": "test-partner",
+                  "clickUrl": "https://example.com/click",
+                  "telemetrySuffix": "test-suffix",
+                  "urls": {
+                    "search": {
+                      "base": "https://example.com/search?q={searchTerm}",
+                      "method": "GET",
+                      "params": []
+                    }
+                  }
+                }
+              ]
+            })
+            .to_string(),
+        );
         let config_result = Arc::clone(&selector).set_search_config(
             json!({
               "data": [
@@ -754,6 +841,11 @@ mod tests {
             config_result.is_ok(),
             "Should have set the configuration successfully. {:?}",
             config_result
+        );
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
         );
 
         let mut result = Arc::clone(&selector).filter_engine_configuration(SearchUserEnvironment {
@@ -908,6 +1000,26 @@ mod tests {
     fn test_filter_engine_configuration_handles_environments() {
         let selector = Arc::new(SearchEngineSelector::new());
 
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+            "data": [
+                {
+                  "identifier": "overrides-engine",
+                  "partnerCode": "test-partner",
+                  "clickUrl": "https://example.com/click",
+                  "telemetrySuffix": "test-suffix",
+                  "urls": {
+                    "search": {
+                      "base": "https://example.com/search?q={searchTerm}",
+                      "method": "GET",
+                      "params": []
+                    }
+                  }
+                }
+              ]
+            })
+            .to_string(),
+        );
         let config_result = Arc::clone(&selector).set_search_config(
             json!({
               "data": [
@@ -983,6 +1095,11 @@ mod tests {
             config_result.is_ok(),
             "Should have set the configuration successfully. {:?}",
             config_result
+        );
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
         );
 
         let mut result = Arc::clone(&selector).filter_engine_configuration(SearchUserEnvironment {
@@ -1134,6 +1251,26 @@ mod tests {
     fn test_set_config_should_handle_default_engines() {
         let selector = Arc::new(SearchEngineSelector::new());
 
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+            "data": [
+                {
+                  "identifier": "overrides-engine",
+                  "partnerCode": "test-partner",
+                  "clickUrl": "https://example.com/click",
+                  "telemetrySuffix": "test-suffix",
+                  "urls": {
+                    "search": {
+                      "base": "https://example.com/search?q={searchTerm}",
+                      "method": "GET",
+                      "params": []
+                    }
+                  }
+                }
+              ]
+            })
+            .to_string(),
+        );
         let config_result = Arc::clone(&selector).set_search_config(
             json!({
               "data": [
@@ -1217,6 +1354,11 @@ mod tests {
             config_result.is_ok(),
             "Should have set the configuration successfully. {:?}",
             config_result
+        );
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
         );
 
         let test_engine = SearchEngineDefinition {
@@ -1320,6 +1462,26 @@ mod tests {
     fn test_filter_engine_orders() {
         let selector = Arc::new(SearchEngineSelector::new());
 
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+            "data": [
+                {
+                  "identifier": "overrides-engine",
+                  "partnerCode": "test-partner",
+                  "clickUrl": "https://example.com/click",
+                  "telemetrySuffix": "test-suffix",
+                  "urls": {
+                    "search": {
+                      "base": "https://example.com/search?q={searchTerm}",
+                      "method": "GET",
+                      "params": []
+                    }
+                  }
+                }
+              ]
+            })
+            .to_string(),
+        );
         let engine_order_config = Arc::clone(&selector).set_search_config(
             json!({
               "data": [
@@ -1443,6 +1605,11 @@ mod tests {
             engine_order_config.is_ok(),
             "Should have set the configuration successfully. {:?}",
             engine_order_config
+        );
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
         );
 
         fn assert_actual_engines_equals_expected(
@@ -1910,5 +2077,164 @@ mod tests {
             "Should have selected the private default engine for the matching specific default"
         );
         m.expect(1).assert();
+    }
+
+    #[test]
+    fn test_configuration_overrides_applied() {
+        let selector = Arc::new(SearchEngineSelector::new());
+
+        let config_result = Arc::clone(&selector).set_search_config(
+            json!({
+              "data": [
+                {
+                  "recordType": "engine",
+                  "identifier": "test",
+                  "base": {
+                    "name": "Test",
+                    "classification": "general",
+                    "urls": {
+                      "search": {
+                        "base": "https://example.com",
+                        "method": "GET",
+                      }
+                    }
+                  },
+                  "variants": [{
+                    "environment": {
+                      "allRegionsAndLocales": true
+                    }
+                  }],
+                },
+                {
+                  "recordType": "engine",
+                  "identifier": "distro-default",
+                  "base": {
+                    "name": "Distribution Default",
+                    "classification": "general",
+                    "urls": {
+                      "search": {
+                        "base": "https://example.com",
+                        "method": "GET"
+                      }
+                    }
+                  },
+                  "variants": [{
+                    "environment": {
+                      "allRegionsAndLocales": true
+                    },
+                    "telemetrySuffix": "distro-telemetry-suffix",
+                  }],
+                },
+              ]
+            })
+            .to_string(),
+        );
+        assert!(
+            config_result.is_ok(),
+            "Should have set the configuration successfully. {:?}",
+            config_result
+        );
+
+        let test_engine = SearchEngineDefinition {
+            charset: "UTF-8".to_string(),
+            classification: SearchEngineClassification::General,
+            identifier: "test".to_string(),
+            name: "Test".to_string(),
+            partner_code: "override-partner-code".to_string(),
+            telemetry_suffix: "override-telemetry-suffix".to_string(),
+            click_url: Some("https://example.com/click-url".to_string()),
+            urls: SearchEngineUrls {
+                search: SearchEngineUrl {
+                    base: "https://override.com/search".to_string(),
+                    method: "GET".to_string(),
+                    params: vec![SearchUrlParam {
+                        name: "override-name".to_string(),
+                        value: Some("override-value".to_string()),
+                        enterprise_value: None,
+                        experiment_config: None,
+                    }],
+                    search_term_param_name: None,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let distro_default_engine = SearchEngineDefinition {
+            charset: "UTF-8".to_string(),
+            classification: SearchEngineClassification::General,
+            identifier: "distro-default".to_string(),
+            name: "Distribution Default".to_string(),
+            partner_code: "override-partner-code".to_string(),
+            telemetry_suffix: "distro-telemetry-suffix".to_string(),
+            click_url: Some("https://example.com/click-url".to_string()),
+            urls: SearchEngineUrls {
+                search: SearchEngineUrl {
+                    base: "https://override.com/search".to_string(),
+                    method: "GET".to_string(),
+                    params: Vec::new(),
+                    search_term_param_name: None,
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let config_overrides_result = Arc::clone(&selector).set_config_overrides(
+            json!({
+                "data": [
+                    {
+                        "identifier": "test",
+                        "partnerCode": "override-partner-code",
+                        "telemetrySuffix": "override-telemetry-suffix",
+                        "clickUrl": "https://example.com/click-url",
+                        "urls": {
+                          "search": {
+                            "base": "https://override.com/search",
+                            "params": [{
+                              "name": "override-name",
+                              "value": "override-value",
+                            }],
+                          },
+                        },
+                    },
+                    {   // Test partial override with some missing fields
+                        "identifier": "distro-default",
+                        "partnerCode": "override-partner-code",
+                        "clickUrl": "https://example.com/click-url",
+                        "urls": {
+                          "search": {
+                            "base": "https://override.com/search",
+                          },
+                        },
+                    }
+                ]
+            })
+            .to_string(),
+        );
+
+        assert!(
+            config_overrides_result.is_ok(),
+            "Should have set the configuration overrides successfully. {:?}",
+            config_overrides_result
+        );
+
+        let result = Arc::clone(&selector).filter_engine_configuration(SearchUserEnvironment {
+            ..Default::default()
+        });
+        assert!(
+            result.is_ok(),
+            "Should have filtered the configuration without error. {:?}",
+            result
+        );
+
+        assert_eq!(
+            result.unwrap(),
+            RefinedSearchConfig {
+                engines: vec![distro_default_engine.clone(), test_engine.clone(),],
+                app_default_engine_id: None,
+                app_private_default_engine_id: None
+            },
+            "Should have applied the overrides to the matching engine."
+        );
     }
 }
